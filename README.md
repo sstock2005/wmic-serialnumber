@@ -1,6 +1,6 @@
 # wmic serial number
 
-A little script written in Rust to grab your HDD serial number using IOCTLs  
+A little script written in Rust to grab your HDD serial number using IOCTLs and the Windows API  
 
 WMIC Example:  
 ![image](https://github.com/sstock2005/wmic-serialnumber/assets/144393153/1bccfefe-1c04-4d5a-9ddd-20f8cfaad774)
