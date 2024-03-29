@@ -1,0 +1,129 @@
+use std::ffi::{CStr, CString};
+use std::mem::size_of;
+use std::ptr::null_mut;
+use winapi::ctypes::c_void;
+use winapi::shared::minwindef::{BYTE, DWORD, FALSE};
+use winapi::shared::ntdef::BOOLEAN;
+use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
+use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+use winapi::um::winbase::FILE_FLAG_BACKUP_SEMANTICS;
+use winapi::um::winioctl::{IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_PROPERTY_QUERY, StorageDeviceProperty, PropertyStandardQuery};
+use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+fn exist(drive_path: &str) -> bool 
+{
+    let drive_path_cstring = CString::new(drive_path).unwrap();
+
+    let h_device = unsafe 
+    {
+        CreateFileA(
+            drive_path_cstring.as_ptr(),
+            0,
+            FILE_SHARE_READ,
+            null_mut(),
+            OPEN_EXISTING,
+            0,
+            null_mut(),
+        )
+    };
+
+    h_device != INVALID_HANDLE_VALUE
+}
+
+#[repr(C)]
+#[derive(Debug)]
+struct StorageDeviceDescriptor {
+    version: DWORD,
+    size: DWORD,
+    device_type: BYTE,
+    device_type_modifier: BYTE,
+    removable_media: BOOLEAN,
+    command_queueing: BOOLEAN,
+    vendor_id_offset: DWORD,
+    product_id_offset: DWORD,
+    product_revision_offset: DWORD,
+    serial_number_offset: DWORD,
+    bus_type: DWORD,
+    raw_properties_length: DWORD,
+    raw_device_properties: [BYTE; 1]
+}
+
+fn get_serial(drive_path: &str) -> std::io::Result<String> 
+{
+    let mut dw_returned: DWORD = 0;
+    let mut buffer: [u8; 1024] = [0; 1024];
+    let drive_path_cstring = CString::new(drive_path).unwrap();
+
+    let h_device = unsafe 
+    {
+        CreateFileA(
+            drive_path_cstring.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            null_mut(),
+        )
+    };
+
+    if h_device == INVALID_HANDLE_VALUE 
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let mut storage_query: STORAGE_PROPERTY_QUERY = STORAGE_PROPERTY_QUERY 
+    {
+        PropertyId: StorageDeviceProperty,
+        QueryType: PropertyStandardQuery,
+        AdditionalParameters: [0; 1],
+    };
+
+    let b_result = unsafe 
+    {
+        winapi::um::ioapiset::DeviceIoControl(
+            h_device,
+            IOCTL_STORAGE_QUERY_PROPERTY,
+            &mut storage_query as *mut _ as *mut c_void,
+            size_of::<STORAGE_PROPERTY_QUERY>() as DWORD,
+            buffer.as_mut_ptr() as *mut c_void,
+            buffer.len() as DWORD,
+            &mut dw_returned,
+            null_mut(),
+        )
+    };
+
+    if b_result == FALSE 
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let descriptor: StorageDeviceDescriptor = unsafe { std::ptr::read(buffer.as_ptr() as *const _) };
+
+    let serial_number_ptr = unsafe { buffer.as_ptr().offset(descriptor.serial_number_offset as isize) };
+    let serial_number_cstr = unsafe { CStr::from_ptr(serial_number_ptr as *const _) };
+    let serial_number_str = serial_number_cstr.to_str().unwrap();
+
+    Ok(serial_number_str.to_string())
+}
+
+fn main()
+{
+    for n in 0..9
+    {
+        let drive_path = format!("\\\\.\\PhysicalDrive{}", n);
+        if exist(&drive_path) 
+        {
+            println!("[+] drive {} exists", n);
+            match get_serial(&drive_path)
+            {
+                Ok(serial) => println!("[+] serial: {}", serial),
+                Err(e) => println!("[!] error: {}", e)
+            }
+        } 
+        else 
+        {
+            continue;
+        }
+    }
+}
